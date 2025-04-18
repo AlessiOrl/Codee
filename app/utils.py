@@ -10,7 +10,7 @@ def calculate_similarity(message1, message2):
 def update_chat_history(chat_id, message, response):
     try:
         timsetamp = time.time()
-        mongodb_conn = pymongo.MongoClient(f"mongodb://{DB_URL}/")
+        mongodb_conn = pymongo.MongoClient(f"{DB_URL}/")
         
         # insert the interaction into the database
         llm_user = mongodb_conn[f"User_{chat_id}"]
@@ -46,7 +46,7 @@ def update_chat_history(chat_id, message, response):
     return True
 
 def get_chat_history(chat_id):
-    mongodb_conn = pymongo.MongoClient(f"mongodb://{DB_URL}/")
+    mongodb_conn = pymongo.MongoClient(f"{DB_URL}/")
     llm_user = mongodb_conn[f"User_{chat_id}"]
     llm_chathistory = llm_user[f"ChatHistory"]
 
