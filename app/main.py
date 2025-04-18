@@ -92,21 +92,20 @@ async def codee_llm_handler(update: Update, context: CallbackContext) -> None:
 
     prompt, messages = get_prompt(chatID, message, message)
 
-    interaction = []
     interaction_timsetamp = time.time() 
     
-    embedding = call_embedder_api(messages)
+    embedding_msg = call_embedder_api(messages)
 
-    interaction.append({
+    json_msg = {
             "chat_id": chatID,
             "role": "user",
-            "content": embedding,
+            "content": message,
             "timestamp": interaction_timsetamp,
-            "embedding": embedding,
+            "embedding": embedding_msg,
             "metadata": None,
-        })
+        }
 
-    messages = [{"role": "user", "content": embedding}]
+    messages = [{"role": "user", "content": message}]
     
     llm_response = call_llm_api(prompt, messages)
     code = llm_response.status_code
@@ -145,6 +144,21 @@ async def codee_llm_handler(update: Update, context: CallbackContext) -> None:
         if i > 0 and aux_last_message != complete_text:
             # send the final response message
             await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=response_msg.message_id, text=complete_text)
+
+        embedding_rsp = call_embedder_api(complete_text, complete_text)
+        
+        json_response = {
+            "chat_id": chatID,
+            "role": "assistant",
+            "content": complete_text,
+            "timestamp": interaction_timsetamp,
+            "embedding": embedding_rsp,
+            "metadata": None,
+        }
+        
+        # update the chat history in the database
+        #update_chat_history(chatID, json_msg, json_response)
+    
     else:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
