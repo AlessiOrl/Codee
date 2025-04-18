@@ -2,3 +2,4 @@ python-telegram-bot==21.11
 requests
 httpx
 pymongo
+numpy
