@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 from datetime import datetime, timezone
 
 
-def call_embedder_api(prompt, messages):
+def call_embedder_api(message):
     return [0.2, 0.3, 0.4]  # Placeholder for actual embedding call
 
 def call_llm_api(system_prompt, messages):
@@ -94,7 +94,7 @@ async def codee_llm_handler(update: Update, context: CallbackContext) -> None:
 
     interaction_timsetamp = time.time() 
     
-    embedding_msg = call_embedder_api(messages)
+    embedding_msg = call_embedder_api(message)
 
     json_msg = {
             "chat_id": chatID,
@@ -145,7 +145,7 @@ async def codee_llm_handler(update: Update, context: CallbackContext) -> None:
             # send the final response message
             await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=response_msg.message_id, text=complete_text)
 
-        embedding_rsp = call_embedder_api(complete_text, complete_text)
+        embedding_rsp = call_embedder_api(complete_text)
         
         json_response = {
             "chat_id": chatID,
@@ -155,7 +155,7 @@ async def codee_llm_handler(update: Update, context: CallbackContext) -> None:
             "embedding": embedding_rsp,
             "metadata": None,
         }
-        
+
         # update the chat history in the database
         #update_chat_history(chatID, json_msg, json_response)
     
