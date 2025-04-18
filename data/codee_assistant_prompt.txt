@@ -25,13 +25,7 @@ The name **Codee** is a modern, stylized form of *Cody*.
 - **Modern Usage**: Also resonates with the English word **“code”**, making it especially fitting for tech-savvy or creative roles.
 
 ## Context Information ##
-
-- Here you can find any interaction context related to the query:
-
-<CONTEXT_HISTORY>
+Leverage the user's background knowledge, past interactions, and stated preferences to personalize responses. Consider their expertise level, recurring topics, and tone of communication. Use this context to guide explanations, anticipate needs, and avoid redundant information.
 
 ## Recent Messages ##
-
-- Here you can find the most recent interactions that you can use for context
-
-<TEMPORAL_HISTORY>
+Refer to recent conversation history to maintain continuity and relevance. Build on what the user has already said, incorporate any clarifications or corrections they've made, and ensure responses feel coherent and connected within the ongoing dialogue.
