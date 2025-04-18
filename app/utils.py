@@ -1,11 +1,34 @@
 import os, pymongo, json, time
+import numpy as np
 
 DB_URL = os.environ['DB_URL']
+try:
+    MAX_RETENTION = int(os.environ['MAX_RETENTION'])
+    assert MAX_RETENTION > 0, "MAX_RETENTION must be greater than 0"
+except Exception as e:
+    print("MAX_RETENTION not set or invalid, using default value of 10")
+    MAX_RETENTION = 10
 
-def calculate_similarity(message1, message2):
-    # Placeholder for actual similarity calculation
-    # For now, we will just return a dummy value
-    return 0.2
+try:
+    TOP_K_MESSAGES = int(os.environ['TOP_K_MESSAGES'])
+    assert TOP_K_MESSAGES > 0, "TOP_K_MESSAGES must be greater than 0"
+    assert TOP_K_MESSAGES <= 100, "TOP_K_MESSAGES must be less than or equal to 100"
+except Exception as e:
+    print("TOP_K_MESSAGES not set or invalid, using default value of 5")
+    TOP_K_MESSAGES = 5
+
+
+def cosine_similarity(vec1, vec2):
+    vec1 = np.array(vec1)
+    vec2 = np.array(vec2)
+    dot_product = np.dot(vec1, vec2)
+    norm_a = np.linalg.norm(vec1)
+    norm_b = np.linalg.norm(vec2)
+    return dot_product / (norm_a * norm_b)
+
+
+def calculate_similarity(embedding1, embedding2):
+    return cosine_similarity(embedding1, embedding2)
 
 def update_chat_history(chat_id, message, response):
     try:
@@ -52,7 +75,8 @@ def get_chat_history(chat_id):
 
     return llm_chathistory, mongodb_conn
 
-def get_prompt(chat_id, completion, user_message):
+def get_prompt(chat_id, user_message):
+    messages = []
     # connect to the database
     llm_chathistory, mongodb_conn = get_chat_history(chat_id)
 
@@ -62,46 +86,39 @@ def get_prompt(chat_id, completion, user_message):
 
     # add <CONTEXT_HISTORY> to the prompt
     query_context = {"chat_id": chat_id}
-    recent_100_messages = llm_chathistory.find(query_context).sort("timestamp", pymongo.DESCENDING).limit(100)
+    recent_x_messages = llm_chathistory.find(query_context).sort("timestamp", pymongo.DESCENDING).limit(200)
     similairies = []
-    for message in recent_100_messages:
-        similairy = calculate_similarity(message["content"], user_message)
+    for message in recent_x_messages:
+        similairy = calculate_similarity(user_message["embedding"], message["embedding"])
         # filter out similarities under a certain threshold
-        if similairy > 0.2:
+        if similairy > 0.9:
             similairies.append({"role": message["role"], "content": message["content"], "similarity": similairy})
+    
     # sort the messages by similarity
     similairies.sort(reverse=True)
-    # get the top 5 most similar messages
-    top_5_similar_messages = similairies[:5]
+    # get the top x most similar messages
+    top_x_similar_messages = similairies[:TOP_K_MESSAGES]
 
     # add the top 5 messages to the prompt
-    meta_prompt = ""
-    for message in top_5_similar_messages:
-        meta_prompt += message["role"] + ": " + message["content"] + "\n"
-
-    if meta_prompt == "":
-        meta_prompt = "No similar messages found.\n"
-
-    # add the meta prompt to the prompt
-    prompt = prompt.replace("<CONTEXT_HISTORY>", meta_prompt)
+    messages.append({"role": "systes", "content": "Here are some similar messages to your query:\n"})
+    for message in top_x_similar_messages:
+        messages.append({message["role"] : message["content"]})
 
     # add <TEMPORAL_HISTORY> to the prompt
     # get the last 10 messages 
     query = {"chat_id": chat_id}
-    recent_messages = llm_chathistory.find(query).sort("timestamp", pymongo.DESCENDING).limit(10)
+    recent_messages = llm_chathistory.find(query).sort("timestamp", pymongo.DESCENDING).limit(MAX_RETENTION)
     # add the messages to the prompt
-    meta_prompt = ""
+
+
+    messages.append({"role": "systes", "content": "Here are the last messages in the conversation:\n"})
     for message in recent_messages:
-        meta_prompt += message["role"] + ": " + message["content"] + "\n"
+        messages.append({message["role"] : message["content"]})
 
-    if meta_prompt == "":
-        meta_prompt = "No recent messages found.\n"
+    # add <USER_MESSAGE> to the prompt
+    messages.append({"role": "systes", "content": "Here is the user Query:\n"})
+    messages.append({"role": "user", "content": user_message})
 
-    # add the meta prompt to the prompt
-    prompt = prompt.replace("<TEMPORAL_HISTORY>", meta_prompt)
-
-    messages = [{"role": "system", "content": prompt}, {"role": "user", "content": completion}]
-    
     # close the connection
     mongodb_conn.close()
 
