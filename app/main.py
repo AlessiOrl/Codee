@@ -20,10 +20,10 @@ import json
 import logging
 import os
 import time
-import httpx as requests
+import httpx
 
-from telegram import ForceReply, Update, constants
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, Updater, CallbackContext, MessageHandler
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, MessageHandler
 import os
 from utils import get_prompt, update_chat_history, calculate_similarity
 
@@ -42,7 +42,21 @@ from datetime import datetime, timezone
 
 
 def call_embedder_api(message):
-    return [0.2, 0.3, 0.4]  # Placeholder for actual embedding call
+    url = "http://192.168.178.200:8001/embeddings"
+    headers = {
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "input": f"{message}",
+    }
+    embedding = [0] * 512
+    llm_response_call = httpx.post(url, headers=headers, json=payload, timeout=20)
+    if llm_response_call.status_code == 200:
+        # print the response message (streamable) and save the response to the database
+        embedding = llm_response_call.json()[0]["embedding"][0]
+    else:
+        print("There was an error getting the response from the embedding model. Please try again later.")
+    return embedding
 
 def call_llm_api(system_prompt, messages):
     url = "http://192.168.178.200:8000/v1/chat/completions"
@@ -64,8 +78,8 @@ def call_llm_api(system_prompt, messages):
             "role": message["role"],
             "content": message["content"]
         })
-
-    return requests.post(url, headers=headers, json=payload, stream=True) 
+    
+    return httpx.stream('POST', url, headers=headers, json=payload, timeout=20)
 
 def utc_to_local(utc_dt):
     return utc_dt.replace(tzinfo=timezone.utc).astimezone(tz=None)
@@ -90,7 +104,7 @@ async def codee_llm_handler(update: Update, context: CallbackContext) -> None:
     message = update.message.text
     complete_text = ""
 
-    prompt, messages = get_prompt(chatID, message, message)
+    prompt, messages = get_prompt(chatID, message)
 
     interaction_timsetamp = time.time() 
     
@@ -107,63 +121,63 @@ async def codee_llm_handler(update: Update, context: CallbackContext) -> None:
 
     messages = [{"role": "user", "content": message}]
     
-    llm_response = call_llm_api(prompt, messages)
-    code = llm_response.status_code
-    if code == 200:
-        i = 0
-        aux_last_message = ""
-        sentence_chunk = ""
-        for response_orig in llm_response.iter_lines():
-            response = response_orig.decode("utf-8").replace("data: ", "")
-            if response == "[DONE]":
-                break
-            if response == "":
-                continue
-            response = json.loads(response)
-            if "choices" in response:
-                for choice in response["choices"]:
-                    if "delta" in choice and "content" in choice["delta"]:
-                        sentence_chunk += choice["delta"]["content"]
-                        # if the sentence_chunk has a period, exclamation mark, question mark, semi-colon or colon, then it is a complete sentence
-                        if any(x in sentence_chunk for x in [".", "\n"]):
-                            complete_text += sentence_chunk
-                            sentence_chunk = ""
-                            if len(complete_text) > 0:
-                                if  i == 0:
-                                    # if is the first chunk start the response message 
-                                    response_msg = await context.bot.send_message(chat_id=update.effective_chat.id, text=complete_text)
-                                    aux_last_message = complete_text
-                                else:
-                                    # if is not the first chunk edit the response message
-                                    await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=response_msg.message_id, text=complete_text)
-                                    aux_last_message = complete_text
-                                i += 1
-                    if "finish_reason" in choice and choice["finish_reason"] == "stop":
-                        break
-        complete_text += sentence_chunk
-        if i > 0 and aux_last_message != complete_text:
-            # send the final response message
-            await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=response_msg.message_id, text=complete_text)
+    llm_response_call = call_llm_api(prompt, messages)
+    with llm_response_call as llm_response:
+        code = llm_response.status_code
+        if code == 200:
+            i = 0
+            aux_last_message = ""
+            sentence_chunk = ""
+            for response_orig in llm_response.iter_raw():
+                response = response_orig.decode("utf-8").replace("data: ", "")
+                if response.replace("\n", "") == "[DONE]" or response.replace("\n", "") == "":
+                    continue
 
-        embedding_rsp = call_embedder_api(complete_text)
-        
-        json_response = {
-            "chat_id": chatID,
-            "role": "assistant",
-            "content": complete_text,
-            "timestamp": interaction_timsetamp,
-            "embedding": embedding_rsp,
-            "metadata": None,
-        }
+                response = json.loads(response)
+                if "choices" in response:
+                    for choice in response["choices"]:
+                        if "delta" in choice and "content" in choice["delta"]:
+                            sentence_chunk += choice["delta"]["content"]
+                            # if the sentence_chunk has a period, exclamation mark, question mark, semi-colon or colon, then it is a complete sentence
+                            if any(x in sentence_chunk for x in [".", "\n"]):
+                                complete_text += sentence_chunk
+                                sentence_chunk = ""
+                                if len(complete_text) > 0:
+                                    if  i == 0:
+                                        # if is the first chunk start the response message 
+                                        response_msg = await context.bot.send_message(chat_id=update.effective_chat.id, text=complete_text)
+                                        aux_last_message = complete_text
+                                    else:
+                                        # if is not the first chunk edit the response message
+                                        await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=response_msg.message_id, text=complete_text)
+                                        aux_last_message = complete_text
+                                    i += 1
+                        if "finish_reason" in choice and choice["finish_reason"] == "stop":
+                            break
+            complete_text += sentence_chunk
+            if i > 0 and aux_last_message != complete_text:
+                # send the final response message
+                await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=response_msg.message_id, text=complete_text)
 
-        # update the chat history in the database
-        #update_chat_history(chatID, json_msg, json_response)
-    
-    else:
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="There was an error getting the response from the model. Please try again later.",
-        )
+            embedding_rsp = call_embedder_api(complete_text)
+            
+            json_response = {
+                "chat_id": chatID,
+                "role": "assistant",
+                "content": complete_text,
+                "timestamp": interaction_timsetamp,
+                "embedding": embedding_rsp,
+                "metadata": None,
+            }
+
+            # update the chat history in the database
+            update_chat_history(chatID, json_msg, json_response)       
+            return
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="There was an error getting the response from the model. Please try again later.",)
+            return
 
 def main() -> None:
     """Start the bot."""
