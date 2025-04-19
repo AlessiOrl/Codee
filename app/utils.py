@@ -28,7 +28,7 @@ def cosine_similarity(vec1, vec2):
 
 
 def calculate_similarity(embedding1, embedding2):
-    return cosine_similarity(embedding1, embedding2)
+    return float(cosine_similarity(embedding1, embedding2))
 
 def update_chat_history(chat_id, message, response):
     try:
@@ -75,34 +75,35 @@ def get_chat_history(chat_id):
 
     return llm_chathistory, mongodb_conn
 
-def get_prompt(chat_id, user_message):
-    messages = []
-    # connect to the database
-    llm_chathistory, mongodb_conn = get_chat_history(chat_id)
 
-    # load prompt
-    with open("./data/codee_assistant_prompt.txt", "r", encoding="utf-8") as f:
-        prompt = f.read()
+def add_context_to_prompt(chat_id, prompt, messages):
+    llm_chathistory, mongodb_conn = get_chat_history(chat_id)
 
     # add <CONTEXT_HISTORY> to the prompt
     query_context = {"chat_id": chat_id}
     recent_x_messages = llm_chathistory.find(query_context).sort("timestamp", pymongo.DESCENDING).limit(200)
     similairies = []
     for message in recent_x_messages:
-        similairy = calculate_similarity(user_message["embedding"], message["embedding"])
+        similairy = calculate_similarity(user_embedding, message["embedding"])
         # filter out similarities under a certain threshold
         if similairy > 0.9:
             similairies.append({"role": message["role"], "content": message["content"], "similarity": similairy})
     
     # sort the messages by similarity
-    similairies.sort(reverse=True)
+    similairies.sort(reverse=True, key=lambda x: x["similarity"])
     # get the top x most similar messages
     top_x_similar_messages = similairies[:TOP_K_MESSAGES]
 
     # add the top 5 messages to the prompt
-    messages.append({"role": "systes", "content": "Here are some similar messages to your query:\n"})
+    messages.append({"role": "system", "content": "Here are some similar messages to your query:\n"})
     for message in top_x_similar_messages:
-        messages.append({message["role"] : message["content"]})
+        messages.append({"role": message["role"] , "content": message["content"]})
+
+    mongodb_conn.close()
+    return messages
+
+def add_history_to_prompt(chat_id, prompt, messages):
+    llm_chathistory, mongodb_conn = get_chat_history(chat_id)
 
     # add <TEMPORAL_HISTORY> to the prompt
     # get the last 10 messages 
@@ -111,16 +112,29 @@ def get_prompt(chat_id, user_message):
     # add the messages to the prompt
 
 
-    messages.append({"role": "systes", "content": "Here are the last messages in the conversation:\n"})
+    messages.append({"role": "system", "content": "Here are the last messages in the conversation:\n"})
     for message in recent_messages:
-        messages.append({message["role"] : message["content"]})
+        messages.append({"role": message["role"] , "content": message["content"]})
 
-    # add <USER_MESSAGE> to the prompt
-    messages.append({"role": "systes", "content": "Here is the user Query:\n"})
-    messages.append({"role": "user", "content": user_message})
-
-    # close the connection
     mongodb_conn.close()
 
-    return prompt, messages
+def get_prompt(chat_id, user_json:dict):
+    user_message = user_json["content"]
+    user_embedding = user_json["embedding"]
+    messages = []
 
+    # load prompt
+    with open("./data/codee_assistant_prompt.txt", "r", encoding="utf-8") as f:
+        prompt = f.read()
+
+    # add context to the prompt
+    prompt, messages = add_context_to_prompt(chat_id, prompt, messages)
+    
+    # add history to the prompt
+    prompt, messages = add_history_to_prompt(chat_id, prompt, messages)
+    
+    # add <USER_MESSAGE> to the prompt
+    messages.append({"role": "system", "content": "Here is the user Query:\n"})
+    messages.append({"role": "user", "content": user_message})
+
+    return prompt, messages
