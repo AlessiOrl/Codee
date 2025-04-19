@@ -59,6 +59,8 @@ def call_embedder_api(message):
     return embedding
 
 def call_llm_api(system_prompt, messages):
+    #logger.info("system_prompt: %s", system_prompt)
+    logger.info("messages: %s", messages)
     url = "http://192.168.178.200:8000/v1/chat/completions"
     headers = {
         "Content-Type": "application/json"
@@ -78,7 +80,9 @@ def call_llm_api(system_prompt, messages):
             "role": message["role"],
             "content": message["content"]
         })
-    
+    # save the payload as json for debugging purposes
+    with open("./data/payload.json", "w") as f:
+        json.dump(payload, f, indent=4)
     return httpx.stream('POST', url, headers=headers, json=payload, timeout=20)
 
 def utc_to_local(utc_dt):
@@ -104,8 +108,6 @@ async def codee_llm_handler(update: Update, context: CallbackContext) -> None:
     message = update.message.text
     complete_text = ""
 
-    prompt, messages = get_prompt(chatID, message)
-
     interaction_timsetamp = time.time() 
     
     embedding_msg = call_embedder_api(message)
@@ -118,9 +120,11 @@ async def codee_llm_handler(update: Update, context: CallbackContext) -> None:
             "embedding": embedding_msg,
             "metadata": None,
         }
-
-    messages = [{"role": "user", "content": message}]
     
+    prompt, messages = get_prompt(chatID, json_msg)
+    # save prompt to a file for debugging purposes as json  
+
+
     llm_response_call = call_llm_api(prompt, messages)
     with llm_response_call as llm_response:
         code = llm_response.status_code
@@ -149,7 +153,12 @@ async def codee_llm_handler(update: Update, context: CallbackContext) -> None:
                                         aux_last_message = complete_text
                                     else:
                                         # if is not the first chunk edit the response message
-                                        await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=response_msg.message_id, text=complete_text)
+                                        # check if the last message is different from the current message
+                                        if aux_last_message != complete_text:
+                                            try:
+                                                await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=response_msg.message_id, text=complete_text)
+                                            except Exception as e:
+                                                pass
                                         aux_last_message = complete_text
                                     i += 1
                         if "finish_reason" in choice and choice["finish_reason"] == "stop":
@@ -157,7 +166,10 @@ async def codee_llm_handler(update: Update, context: CallbackContext) -> None:
             complete_text += sentence_chunk
             if i > 0 and aux_last_message != complete_text:
                 # send the final response message
-                await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=response_msg.message_id, text=complete_text)
+                try:
+                    await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=response_msg.message_id, text=complete_text)
+                except Exception as e:
+                    pass
 
             embedding_rsp = call_embedder_api(complete_text)
             
